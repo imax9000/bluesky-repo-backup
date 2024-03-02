@@ -14,4 +14,4 @@ delete-did: did.txt | key.pub key.priv
 	go run ./cmd/delete-did
 
 add-key: | key.pub key.priv
-	go run ./cmd/add-key-to-plc
+	PUBLIC_KEY="$$(cat key.pub)" go run ./cmd/add-key-to-plc
