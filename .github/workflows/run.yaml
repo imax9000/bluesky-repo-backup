@@ -1,5 +1,7 @@
 on:
   workflow_dispatch:
+  schedule:
+    - '41 */6 * * *'
 
 jobs:
   fetch:
