@@ -1,7 +1,7 @@
 on:
   workflow_dispatch:
   schedule:
-    - '41 */6 * * *'
+    - cron: '41 */6 * * *'
 
 jobs:
   fetch:
