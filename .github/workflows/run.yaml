@@ -16,7 +16,7 @@ jobs:
       - name: "TODO: validate the signature"
         run: echo
       - name: "TODO: ensure that PLC has our key"
-        if: ${{ vars.PUBLIC_KEY != "" }}
+        if: ${{ vars.PUBLIC_KEY != '' }}
         env:
           PUBLIC_KEY: ${{ vars.PUBLIC_KEY }}
           PASSWORD: ${{ secrets.PASSWORD }}
