@@ -1,16 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"slices"
 
-	"github.com/bluesky-social/indigo/xrpc"
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/kelseyhightower/envconfig"
+
+	comatproto "github.com/bluesky-social/indigo/api/atproto"
+	"github.com/bluesky-social/indigo/xrpc"
 	"github.com/uabluerail/bsky-tools/xrpcauth"
 
 	"github.com/imax9000/bluesky-repo-backup/plc"
@@ -53,11 +58,6 @@ func main() {
 		return
 	}
 
-	data.Type = "plc_operation"
-	data.RotationKeys = append([]string{config.PublicKey},
-		slices.DeleteFunc(data.RotationKeys, func(s string) bool { return s == config.PublicKey })...)
-	data.Sig = ptr("invalid, all rotation keys are held hostage")
-
 	pds := ""
 	if data.Services != nil {
 		pds = data.Services["atproto_pds"].Endpoint
@@ -70,6 +70,40 @@ func main() {
 	client := xrpcauth.NewClientWithTokenSource(ctx, xrpcauth.PasswordAuth(config.DID, config.Password))
 	client.Host = pds
 
+	token := os.Getenv("TOKEN")
+	// TODO: if our key is present in the data from PLC - use it for signing directly instead of
+	// requesting the PDS to sign.
+	if token == "" {
+		err := comatproto.IdentityRequestPlcOperationSignature(ctx, client)
+		if err != nil {
+			log.Fatalf("Failed to request PLC operation signature from PDS: %s", err)
+		}
+		fmt.Println("Please check your email for the authorization code and add it to your .env file as a TOKEN variable")
+		return
+	}
+
+	update := &comatproto.IdentitySignPlcOperation_Input{
+		RotationKeys: append([]string{config.PublicKey},
+			slices.DeleteFunc(data.RotationKeys, func(s string) bool { return s == config.PublicKey })...),
+		Token: ptr(token),
+	}
+
+	// Fails with `decoding xrpc response: unrecognized lexicon type: ""`
+	//
+	// signedResp, err := comatproto.IdentitySignPlcOperation(ctx, client, update)
+	// if err != nil {
+	// 	log.Fatalf("Failed to get a signature for the PLC operation from PDS: %s", err)
+	// }
+
+	var signedOp struct {
+		Operation plc.Op `json:"operation"`
+	}
+	err = client.Do(ctx, xrpc.Procedure, "application/json",
+		"com.atproto.identity.signPlcOperation", nil, update, &signedOp)
+	if err != nil {
+		log.Fatalf("Failed to get a signature for the PLC operation from PDS: %s", err)
+	}
+
 	// Fails with "error calling MarshalJSON for type *util.LexiconTypeDecoder: lexicon type decoder can only handle record fields"
 	//
 	// req := &comatproto.IdentitySubmitPlcOperation_Input{
@@ -79,14 +113,31 @@ func main() {
 	// 	log.Fatalf("Failed to update rotation keys in PLC via PDS: %s", err)
 	// }
 
-	log.Printf("Sending the following operation to %s:\n%+v", pds, data)
+	// Fails with "XRPC ERROR 400: InvalidRequest: Rotation keys do not include server's rotation key"
+	//
+	// err = client.Do(ctx, xrpc.Procedure, "application/json",
+	// 	"com.atproto.identity.submitPlcOperation", nil,
+	// 	signedOp, nil)
+	// if err != nil {
+	// 	log.Fatalf("Failed to update rotation keys in PLC via PDS: %s", err)
+	// }
 
-	err = client.Do(ctx, xrpc.Procedure, "application/json",
-		"com.atproto.identity.submitPlcOperation", nil,
-		map[string]any{"operation": data}, nil)
+	log.Printf("Sending the following operation to PLC:\n%+v", signedOp)
+
+	payload, err := json.Marshal(signedOp.Operation)
 	if err != nil {
-		log.Fatalf("Failed to update rotation keys in PLC via PDS: %s", err)
+		log.Fatalf("Failed to marshal the signed operation as JSON: %s", err)
 	}
+
+	resp, err = http.Post(fmt.Sprintf("%s/%s", config.PLCAddr, config.DID), "application/json", bytes.NewReader(payload))
+	if err != nil {
+		log.Fatalf("Failed to send the update request to PLC: %s", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("Unexpected response code from PLC: %s", resp.Status)
+	}
+	io.Copy(os.Stdout, resp.Body)
 }
 
 func ptr[T any](v T) *T {
