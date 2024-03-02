@@ -26,6 +26,7 @@ jobs:
 
   publish:
     permissions:
+      id-token: write
       pages: write
     needs: fetch
     runs-on: ubuntu-latest
