@@ -1,0 +1,34 @@
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    env:
+      DID: ${{ vars.DID }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch repo from PDS
+        run: |
+          mkdir -p _site/xrpc
+          wget -O _site/did.json "https://plc.directory/${DID:?must specify DID}"
+          PDS="$(jq -r '.service[] | select(.id == "#atproto_pds" and .type == "AtprotoPersonalDataServer") | .serviceEndpoint' _site/did.json | head -n 1)"
+          wget -O _site/xrpc/com.atproto.sync.getRepo "${PDS}/xrpc/com.atproto.sync.getRepo?did=${DID}"
+      - name: "TODO: validate the signature"
+        run: echo
+      - name: "TODO: ensure that PLC has our key"
+        if: ${{ vars.PUBLIC_KEY != "" }}
+        env:
+          PUBLIC_KEY: ${{ vars.PUBLIC_KEY }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+        run: echo
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+
+  publish:
+    permissions:
+      pages: write
+    needs: fetch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
